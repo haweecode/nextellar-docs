@@ -23,7 +23,7 @@ The `useStellarBalances` hook provides real-time balance tracking for Stellar ac
 - **All Assets**: XLM and custom asset support via Horizon
 - **Unfunded Accounts**: Gracefully handles new accounts (404 → empty balances)
 - **Auto-Config**: Uses WalletProvider settings as fallback
-- **Polling Cleanup**: Clears polling timers when the key changes or component unmounts
+- **Polling Cleanup**: Stops interval timers when the key changes or the component unmounts
 
 ## Basic Usage
 
@@ -73,11 +73,11 @@ useStellarBalances(
 ): StellarBalancesState;
 ```
 
-| Parameter                | Type                          | Default                             | Description                                                                                                                   |
-| ------------------------ | ----------------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `publicKey`              | `string \| null \| undefined` | `undefined`                         | Account public key. If omitted or empty, balances clear and no request runs.                                                  |
-| `options.horizonUrl`     | `string`                      | Wallet config, then testnet Horizon | Horizon server URL.                                                                                                           |
-| `options.pollIntervalMs` | `number \| null`              | `undefined`                         | Poll interval in ms. Positive values below 5000 are clamped to 5000; unset, `null`, zero, or negative values disable polling. |
+| Parameter                | Type                          | Default                             | Description                                                                                                                      |
+| ------------------------ | ----------------------------- | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `publicKey`              | `string \| null \| undefined` | `undefined`                         | Account public key. If omitted or empty, balances clear and no request runs.                                                     |
+| `options.horizonUrl`     | `string`                      | Wallet config, then testnet Horizon | Horizon server URL.                                                                                                              |
+| `options.pollIntervalMs` | `number \| null`              | `undefined`                         | Polling interval in ms. Positive values below 5000 are clamped to 5000; unset, `null`, zero, or negative values disable polling. |
 
 ### Return Value
 
@@ -95,7 +95,7 @@ interface AssetBalance {
   asset_code?: string; // Only for non-native assets
   asset_issuer?: string; // Only for non-native assets
   balance: string; // Stringified balance value
-  limit?: string; // Trustline limit; absent for native
+  limit?: string; // Trustline limit; absent for native assets
 }
 ```
 
@@ -107,9 +107,99 @@ interface AssetBalance {
 - `refresh`: Async function to manually trigger a balance fetch and update state
 - `stopPolling`: Stops the active polling interval without disabling manual refresh
 
-With no public key, balances are empty, `loading` is false, and `error` is null. A Horizon 404 is treated as an unfunded account and returns an empty balance list. Other request failures set `error` and preserve the last successful balance data.
+With no public key, the hook returns an empty balance list, `loading: false`, and no error. A Horizon 404 is treated as an unfunded account and also produces an empty list. On other request errors, the last successful balances are retained while `error` is set.
 
 ## Examples
+
+### Loading and Empty States
+
+Display appropriate UI states while balances are loading or when an account has no balances:
+
+```tsx
+import { useStellarBalances } from '@/hooks/useStellarBalances';
+
+export function BalanceCard({ publicKey }: { publicKey: string }) {
+  const { balances, loading, error, refresh } = useStellarBalances(publicKey);
+
+  // Loading state
+  if (loading && balances.length === 0) {
+    return (
+      <div className="balance-card loading">
+        <div className="skeleton-header" />
+        <div className="skeleton-list">
+          <div className="skeleton-item" />
+          <div className="skeleton-item" />
+          <div className="skeleton-item" />
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (error) {
+    return (
+      <div className="balance-card error">
+        <div className="error-icon">⚠️</div>
+        <h3>Failed to load balances</h3>
+        <p>{error.message}</p>
+        <button onClick={refresh} className="retry-button">
+          Try Again
+        </button>
+      </div>
+    );
+  }
+
+  // Empty state (no balances found)
+  if (balances.length === 0) {
+    return (
+      <div className="balance-card empty">
+        <div className="empty-icon">💰</div>
+        <h3>No balances found</h3>
+        <p>
+          This account may need funding or hasn't established any trustlines yet.
+        </p>
+        <a
+          href={`https://stellarterm.com/accounts/${publicKey}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="fund-link"
+        >
+          Fund Account
+        </a>
+      </div>
+    );
+  }
+
+  // Success state with balances
+  return (
+    <div className="balance-card">
+      <h3>Your Balances</h3>
+      <ul className="balance-list">
+        {balances.map((balance, index) => (
+          <li key={index} className="balance-item">
+            <span className="asset-name">
+              {balance.asset_type === 'native'
+                ? 'XLM'
+                : `${balance.asset_code}:${balance.asset_issuer?.slice(0, 4)}...`}
+            </span>
+            <span className="balance-amount">{balance.balance}</span>
+          </li>
+        ))}
+      </ul>
+      <button onClick={refresh} className="refresh-button">
+        Refresh
+      </button>
+    </div>
+  );
+}
+```
+
+**Key patterns:**
+
+1. **Loading skeleton**: Shows placeholder UI while data is being fetched
+2. **Error recovery**: Displays error message with a retry button
+3. **Empty state guidance**: Explains why no balances exist and provides next steps
+4. **Conditional rendering**: Only shows the full balance list when data is available
 
 ### With Auto-Refresh (Polling)
 
@@ -202,7 +292,7 @@ export function MainnetBalances({ publicKey }: { publicKey: string }) {
   // Override provider config for this component
   const { balances, loading } = useStellarBalances(publicKey, {
     horizonUrl: 'https://horizon.stellar.org', // Use mainnet
-    pollIntervalMs: 30000,
+    pollIntervalMs: 30000, // Poll every 30 seconds
   });
 
   if (loading) return <div>Syncing...</div>;
@@ -297,13 +387,13 @@ const { error } = useStellarBalances('INVALID-KEY');
 
 ## Best Practices
 
-1. **Set Realistic Poll Intervals**: Positive poll intervals are clamped to at least 5 seconds.
+1. **Set Realistic Poll Intervals**: The hook clamps positive values to at least 5 seconds to avoid excessive requests.
 2. **Handle Null Public Keys**: Always pass `publicKey || null` when account is not connected yet
 3. **Check Asset Type**: Use `asset_type === 'native'` to distinguish XLM from custom assets
 4. **Combine with useStellarWallet**: Pair with wallet hook to get the public key
 5. **Manual Refresh After Transactions**: Call `refresh()` after sending payments to show updated balances immediately
 6. **Cleanup on Unmount**: The hook handles timer cleanup automatically via useEffect
-7. **Avoid Overlapping Requests**: A request-in-flight guard skips duplicate requests; requests are not aborted on key changes.
+7. **Avoid Overlapping Requests**: A module-level guard skips refreshes while another request is in flight; requests are not aborted when the public key changes.
 
 ## Related Hooks
 

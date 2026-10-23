@@ -73,13 +73,17 @@ through a server-side proxy rather than exposing credentials in a
 | `useTrustlines`         | `POST /transactions` - ChangeTrust ops |
 | `useOfferBook`          | `GET /order_book` - DEX queries        |
 
+## Account Data Entries
+
+An account can store up to 100 data entries, each with a value of up to 64 bytes. Each entry counts as a subentry and increases the account's minimum balance by one base reserve. The base reserve is set by the network.
+
 ## Using Horizon in Hooks
 
 ### With WalletProvider (Recommended)
 
 Configure once at the provider level:
 
-````tsx
+```tsx
 <WalletProvider horizonUrl="https://horizon.stellar.org">
   <App /> {/* All hooks use mainnet Horizon */}
 </WalletProvider>
@@ -193,6 +197,10 @@ if (error?.message.includes('404')) {
 }
 ```
 
+## Horizon Ingest Lag
+
+Ingest lag is the gap between the latest ledger closed by Stellar Core and the latest ledger indexed by Horizon. Check the Horizon root endpoint (`GET /`) and compare `core_latest_ledger` with `history_latest_ledger`; their difference is the lag in ledgers.
+
 ## Rate Limiting
 
 Stellar's public Horizon servers have rate limits. For production:
@@ -214,4 +222,3 @@ const { balances } = useStellarBalances(publicKey, {
 - [useStellarBalances](/docs/hooks/use-stellar-balances) - Balance fetching hook
 - [useStellarPayment](/docs/hooks/use-stellar-payment) - Payment transactions
 - [useTransactionHistory](/docs/hooks/use-transaction-history) - Transaction queries
-````

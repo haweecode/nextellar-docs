@@ -17,9 +17,11 @@ The `useOfferBook` hook queries one Stellar DEX buying/selling asset pair and re
 
 ## Features
 
-- **Order Book Data**: Fetch bids and asks for one asset pair
-- **Polling**: Optional refresh interval, disabled by default
-- **Configuration**: Uses the `WalletProvider` Horizon URL when no URL is passed
+- **Order Book Data**: Fetch bids and asks for a trading pair
+- **Price Discovery**: Derive market prices from the top of the book
+- **Depth Analysis**: Analyze order book depth
+- **Live Updates**: Optional built-in polling via `pollIntervalMs`
+- **Multiple Pairs**: Call the hook once per trading pair
 
 ## Basic Usage
 
@@ -27,10 +29,10 @@ The `useOfferBook` hook queries one Stellar DEX buying/selling asset pair and re
 import { useOfferBook } from '@/hooks/useOfferBook';
 
 export default function OrderBook() {
-  const { bids, asks, loading, error, refresh } = useOfferBook(
-    { code: 'USDC', issuer: 'GA5Z...' },
+  const { bids, asks, loading } = useOfferBook(
     'XLM',
-    { pollIntervalMs: 5000 }
+    { code: 'USDC', issuer: 'GA5Z...' },
+    { limit: 20 }
   );
 
   if (loading) return <div>Loading order book...</div>;
@@ -65,12 +67,33 @@ export default function OrderBook() {
 
 ### Parameters
 
+`useOfferBook` takes the two assets as positional arguments, followed by an options object:
+
 ```typescript
-function useOfferBook(
+useOfferBook(
   buying: Asset,
   selling: Asset,
-  opts?: { horizonUrl?: string; limit?: number; pollIntervalMs?: number | null }
-): OfferBookState;
+  opts?: {
+    horizonUrl?: string;
+    limit?: number;
+    pollIntervalMs?: number | null;
+  }
+): OfferBookState
+```
+
+An `Asset` is either the literal string `'XLM'` for the native asset or an object with `code` and `issuer` for issued assets:
+
+```typescript
+type Asset = 'XLM' | { code: string; issuer: string };
+```
+
+| Parameter        | Type             | Default                                                     | Description                                                                                                          |
+| ---------------- | ---------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `buying`         | `Asset`          | **Required**                                                | Asset being bought (first positional argument)                                                                       |
+| `selling`        | `Asset`          | **Required**                                                | Asset being sold (second positional argument)                                                                        |
+| `horizonUrl`     | `string`         | Provider's `horizonUrl`, else `https://horizon.stellar.org` | Horizon endpoint to query. When used inside a `WalletProvider`, the provider's `horizonUrl` is used as the fallback. |
+| `limit`          | `number`         | `20`                                                        | Number of offers per side                                                                                            |
+| `pollIntervalMs` | `number \| null` | `null`                                                      | When set, the hook refetches the book on this interval (in milliseconds)                                             |
 
 type Asset = 'XLM' | { code: string; issuer: string };
 
@@ -82,70 +105,74 @@ interface OfferBookState {
   stopPolling: () => void;
   error: Error | null;
 }
+
+type Offer = {
+  price: string;
+  amount: string;
+  seller: string;
+  buying: Asset;
+  selling: Asset;
+};
 ```
 
-| Option                | Type             | Default                                             | Description                             |
-| --------------------- | ---------------- | --------------------------------------------------- | --------------------------------------- |
-| `opts.horizonUrl`     | `string`         | Provider config, then `https://horizon.stellar.org` | Horizon endpoint.                       |
-| `opts.limit`          | `number`         | `20`                                                | Offers returned per side.               |
-| `opts.pollIntervalMs` | `number \| null` | `null`                                              | Poll interval; `null` disables polling. |
+The hook does not return `midPrice` or `spread` — derive them from `bids` and `asks` as shown in [Get Current Price](#get-current-price).
 
 ## Examples
 
 ### Get Current Price
 
+Derive the mid price and spread from the top of the book:
+
 ```tsx
-type Asset = 'XLM' | { code: string; issuer: string };
+const { bids, asks } = useOfferBook('XLM', {
+  code: 'USDC',
+  issuer: 'GA5Z...',
+});
 
-export function BestAsk({
-  buying,
-  selling,
-}: {
-  buying: Asset;
-  selling: Asset;
-}) {
-  const { asks, bids } = useOfferBook(buying, selling);
+const bestBid = bids.length > 0 ? parseFloat(bids[0].price) : null;
+const bestAsk = asks.length > 0 ? parseFloat(asks[0].price) : null;
+const midPrice =
+  bestBid !== null && bestAsk !== null ? (bestBid + bestAsk) / 2 : null;
+const spread = bestBid !== null && bestAsk !== null ? bestAsk - bestBid : null;
 
-  return (
-    <p>
-      Best bid: {bids[0]?.price ?? '—'}; best ask: {asks[0]?.price ?? '—'}
-    </p>
-  );
-}
+return (
+  <div>
+    <p>Price: {midPrice !== null ? `$${midPrice}` : '—'}</p>
+    <p>Spread: {spread ?? '—'}</p>
+  </div>
+);
 ```
 
 ### Calculate Order Book Depth
 
 ```tsx
-type Asset = 'XLM' | { code: string; issuer: string };
+const { bids, asks } = useOfferBook('XLM', {
+  code: 'USDC',
+  issuer: 'GA5Z...',
+});
 
-export function OrderBookDepth({
-  buying,
-  selling,
-}: {
-  buying: Asset;
-  selling: Asset;
-}) {
-  const { bids, asks } = useOfferBook(buying, selling);
-  const bidVolume = bids.reduce((sum, bid) => sum + Number(bid.amount), 0);
-  const askVolume = asks.reduce((sum, ask) => sum + Number(ask.amount), 0);
+const totalBidVolume = bids.reduce(
+  (sum, bid) => sum + parseFloat(bid.amount),
+  0
+);
+const totalAskVolume = asks.reduce(
+  (sum, ask) => sum + parseFloat(ask.amount),
+  0
+);
 
-  return (
-    <p>
-      Bid volume: {bidVolume}; ask volume: {askVolume}
-    </p>
-  );
-}
+console.log('Buy pressure:', totalBidVolume);
+console.log('Sell pressure:', totalAskVolume);
 ```
 
 ### Live Updates
 
-Pass `pollIntervalMs` to enable polling; the hook clears its interval when the component unmounts.
+Pass `pollIntervalMs` to have the hook refetch the book on an interval. The timer is cleared automatically when the component unmounts; call `stopPolling()` to stop it earlier:
 
 ```tsx
 import { useOfferBook } from '@/hooks/useOfferBook';
 
-type Asset = 'XLM' | { code: string; issuer: string };
+// The hook doesn't export its Asset type — derive it from the signature
+type Asset = Parameters<typeof useOfferBook>[0];
 
 export function LiveOrderBook({
   buying,
@@ -154,7 +181,7 @@ export function LiveOrderBook({
   buying: Asset;
   selling: Asset;
 }) {
-  const { bids, asks, loading, error, refresh } = useOfferBook(
+  const { bids, asks, loading, error, refresh, stopPolling } = useOfferBook(
     buying,
     selling,
     { pollIntervalMs: 5000 }
@@ -167,9 +194,12 @@ export function LiveOrderBook({
   return (
     <section aria-live="polite">
       {error && <p role="alert">Unable to update: {error.message}</p>}
-      <p>{bids.length + asks.length} offers, updated every 5 seconds</p>
+      <p>{bids.length + asks.length} offers, refreshed every 5 seconds</p>
       <button type="button" onClick={() => void refresh()} disabled={loading}>
         Refresh now
+      </button>
+      <button type="button" onClick={stopPolling}>
+        Stop live updates
       </button>
     </section>
   );

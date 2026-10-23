@@ -425,10 +425,9 @@ export const sidebarNav: SidebarSection[] = [
     defaultOpen: false,
     pages: [
       {
-        title: 'ConnectWalletButton',
+        title: 'WalletConnectButton',
         href: '/docs/components/connect-wallet-button',
       },
-      { title: 'useWindowSize', href: '/docs/components/use-window-size' },
     ],
   },
 ];

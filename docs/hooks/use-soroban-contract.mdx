@@ -207,6 +207,94 @@ try {
 }
 ```
 
+### Typed Args and Return Decoding
+
+When working with complex Soroban contracts, you can type your function arguments and decode return values for better type safety.
+
+```tsx
+import { useSorobanContract } from '@/hooks/useSorobanContract';
+import { Address } from '@stellar/stellar-sdk';
+
+// Define your contract function types
+interface TokenContract {
+  balance: (owner: Address) => Promise<bigint>;
+  allowance: (owner: Address, spender: Address) => Promise<bigint>;
+  transfer: (from: Address, to: Address, amount: bigint) => Promise<void>;
+}
+
+export function TokenContractDemo() {
+  const { callFunction, loading } = useSorobanContract({
+    contractId: 'CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQAHHXK3AWCM',
+    network: 'TESTNET',
+  });
+
+  const getBalance = async (ownerAddress: string) => {
+    const owner = new Address(ownerAddress);
+    const balance = await callFunction('balance', [owner]);
+
+    // The hook automatically decodes XDR to JavaScript types
+    // For ScvU128/ScvI128, you'll get a bigint
+    if (typeof balance === 'bigint') {
+      console.log('Balance:', balance.toString());
+      return balance;
+    }
+
+    throw new Error('Unexpected return type');
+  };
+
+  const checkAllowance = async (owner: string, spender: string) => {
+    const ownerAddr = new Address(owner);
+    const spenderAddr = new Address(spender);
+
+    const allowance = await callFunction('allowance', [ownerAddr, spenderAddr]);
+
+    // Decode the returned value
+    if (typeof allowance === 'bigint') {
+      console.log('Allowance:', allowance.toString());
+      return allowance;
+    }
+
+    throw new Error('Unexpected return type');
+  };
+
+  const transferTokens = async (from: string, to: string, amount: string) => {
+    const fromAddr = new Address(from);
+    const toAddr = new Address(to);
+    const amountBigInt = BigInt(amount);
+
+    const result = await callFunction('transfer', [fromAddr, toAddr, amountBigInt]);
+    console.log('Transfer result:', result);
+  };
+
+  return (
+    <div>
+      <button onClick={() => getBalance('GABC123...')} disabled={loading}>
+        Get Balance
+      </button>
+      <button onClick={() => checkAllowance('GABC123...', 'GDEF456...')} disabled={loading}>
+        Check Allowance
+      </button>
+      <button onClick={() => transferTokens('GABC123...', 'GDEF456...', '1000')} disabled={loading}>
+        Transfer 1000 Tokens
+      </button>
+    </div>
+  );
+}
+```
+
+**Type conversion reference:**
+
+| Soroban Type | JavaScript Type | Example |
+| ------------ | --------------- | ------- |
+| `ScvString` | `string` | `'hello'` |
+| `ScvI32` | `number` | `42` |
+| `ScvI64`/`ScvI128` | `bigint` | `1000000000n` |
+| `ScvU64`/`ScvU128` | `bigint` | `1000000000n` |
+| `ScvBool` | `boolean` | `true` |
+| `ScvAddress` | `Address` object | `new Address('G...')` |
+| `ScvVec` | `Array` | `[1, 2, 3]` |
+| `ScvMap` | `Object` | `{ key: 'value' }` |
+
 ## Type Conversion
 
 ### JavaScript to XDR
